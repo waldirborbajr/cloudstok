@@ -1,0 +1,2 @@
+# cloudstok
+KVStoK Cloud Store
