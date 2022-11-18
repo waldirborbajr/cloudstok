@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"errors"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"log"
@@ -17,12 +17,14 @@ import (
 
 var (
 	port           = flag.Int("port", 3100, "port to listen on")
-	sleepSeconds   = flag.Int("sleep", 6, "seconds to sleep before response")
 	timeoutSeconds = flag.Int("timeout", 10, "seconds to wait before shutting down")
 )
 
 func main() {
 	flag.Parse()
+
+	// generate a `Certificate` struct
+	cert, _ := tls.LoadX509KeyPair("./certs/server.crt", "./certs/server.key")
 
 	var err error
 	defer func() {
@@ -31,28 +33,22 @@ func main() {
 		}
 	}()
 
-	if *sleepSeconds < 0 {
-		err = errors.New("you can't reverse the time even if you sleep upside down :P")
-		return
-	}
-	if *timeoutSeconds <= 0 {
-		err = fmt.Errorf("timeout must be larger than 0, got %d", *timeoutSeconds)
-		return
-	}
-
 	server := &GracefulServer{
 		Server: &http.Server{
 			Addr:    fmt.Sprintf(":%d", *port),
-			Handler: downright.SlowHandler(*sleepSeconds),
+			Handler: downright.SlowHandler(),
+			TLSConfig: &tls.Config{
+				Certificates: []tls.Certificate{cert},
+			},
 		},
 	}
 
 	go server.WaitForExitingSignal(time.Duration(*timeoutSeconds) * time.Second)
 
 	log.Printf("listening on port %d...", *port)
-	err = server.ListenAndServe()
+	err = server.ListenAndServeTLS()
 	if err != nil {
-		err = fmt.Errorf("unexpected error from ListenAndServe: %w", err)
+		err = fmt.Errorf("unexpected error from ListenAndServeTLS: %w", err)
 	}
 	log.Println("main goroutine exited.")
 }
@@ -62,12 +58,12 @@ type GracefulServer struct {
 	shutdownFinished chan struct{}
 }
 
-func (s *GracefulServer) ListenAndServe() (err error) {
+func (s *GracefulServer) ListenAndServeTLS() (err error) {
 	if s.shutdownFinished == nil {
 		s.shutdownFinished = make(chan struct{})
 	}
 
-	err = s.Server.ListenAndServe()
+	err = s.Server.ListenAndServeTLS("", "")
 	if err == http.ErrServerClosed {
 		// expected error after calling Server.Shutdown().
 		err = nil
